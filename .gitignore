@@ -1,0 +1,17 @@
+# Dependency directories
+node_modules/
+
+# Environment variables (Cực kỳ quan trọng để bảo mật API Key)
+.env
+
+# Build outputs
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE settings
+.vscode/
+.idea/
