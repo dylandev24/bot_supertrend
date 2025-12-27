@@ -12,8 +12,9 @@ export const CONFIG = {
   INITIAL_SIZE_USDT: 10,
   DCA_STEP_VALUE_USDT: 2,
 
-  // Các thông số có thể thay đổi qua Telegram
-  ATR_PERIOD: 10,
+  TEST_MODE: true,
+
+  ATR_PERIOD: 14,
   ATR_MULTIPLIER: 3.0,
   TARGET_PNL_PERCENT: 0.35,
 };
