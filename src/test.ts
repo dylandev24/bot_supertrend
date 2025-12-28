@@ -7,22 +7,38 @@ const bingx = new BingXService();
 const telly = new TelegramService();
 const wait = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
+/**
+ * Hàm hỗ trợ lấy thời gian Việt Nam định dạng chuỗi
+ */
+function getVNTimeString(date: Date = new Date()): string {
+  return date.toLocaleString("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
 async function runSupertrendTest() {
-  console.log(`🚀 Supertrend Real-time Tester Started...`);
+  console.log(
+    `🚀 Supertrend Real-time Tester Started (Múi giờ: Asia/Ho_Chi_Minh)...`
+  );
 
   let lastTrend: number | null = null;
   let lastSignalTime: number | null = null;
 
   while (true) {
     try {
-      // 1. Lấy nến (BingX 1m)
       const candles = await bingx.getKlines(CONFIG.SYMBOL, "1m");
       if (!candles?.close?.length) {
         await wait(5000);
         continue;
       }
 
-      // 2. Tính toán các đường Supertrend
       const st = calculateSupertrend(
         candles.high,
         candles.low,
@@ -33,20 +49,18 @@ async function runSupertrendTest() {
 
       const currentPrice = candles.close.at(-1) ?? 0;
       const now = Date.now();
+      const timeStr = getVNTimeString(new Date(now));
 
-      // LOGIC NHẠY: So sánh giá hiện tại trực tiếp với đường ST
-      // Nếu giá vượt lên đường ST -> Trend 1 (Long)
-      // Nếu giá sập xuống đường ST -> Trend -1 (Short)
+      // Logic nhạy: So sánh tức thời
       const instantTrend = currentPrice > st.value ? 1 : -1;
 
-      // 3. Kiểm tra đảo chiều tức thì
       if (lastTrend !== null && instantTrend !== lastTrend) {
         let durationStr = "";
         if (lastSignalTime) {
           const diff = Math.floor((now - lastSignalTime) / 1000);
-          durationStr = `⏳ Trend cũ kéo dài: <b>${Math.floor(diff / 60)}m ${
-            diff % 60
-          }s</b>\n`;
+          const mins = Math.floor(diff / 60);
+          const secs = diff % 60;
+          durationStr = `⏳ Trend cũ kéo dài: <b>${mins}m ${secs}s</b>\n`;
         }
 
         const signal = instantTrend === 1 ? "BUY" : "SELL";
@@ -55,7 +69,7 @@ async function runSupertrendTest() {
         telly.sendMessage(
           `${emoji} <b>${signal} SIGNAL (FAST)</b>\n` +
             `📌 Price: <b>${currentPrice}</b>\n` +
-            `🕒 Time: <b>${new Date().toLocaleTimeString("vi-VN")}</b>\n` +
+            `🕒 Time: <b>${timeStr}</b>\n` +
             `${durationStr}📈 Trend mới: <b>${
               instantTrend === 1 ? "LONG" : "SHORT"
             }</b>`,
@@ -65,9 +79,9 @@ async function runSupertrendTest() {
         lastSignalTime = now;
       }
 
-      // Log để bạn soi với TradingView
+      // Log console với múi giờ VN
       console.log(
-        `[${new Date().toLocaleTimeString()}] Price: ${currentPrice.toFixed(
+        `[${timeStr}] Price: ${currentPrice.toFixed(
           2
         )} | ST Line: ${st.value.toFixed(2)} | Trend: ${
           instantTrend === 1 ? "LONG" : "SHORT"
@@ -75,8 +89,6 @@ async function runSupertrendTest() {
       );
 
       lastTrend = instantTrend;
-
-      // Quét nhanh mỗi 5 giây để bắt kịp râu nến
       await wait(5000);
     } catch (e) {
       console.error("❌ Error:", e);
