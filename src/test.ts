@@ -3,56 +3,26 @@ import { TelegramService } from "./services/telegram.service.js";
 import { calculateSupertrend } from "./services/indicator.js";
 import { CONFIG } from "./config/settings.js";
 
-//---------------------------------------
-// INIT SERVICE
-//---------------------------------------
 const bingx = new BingXService();
 const telly = new TelegramService();
-
-// Helper: Đợi n ms
 const wait = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
-/**
- * SUPER TREND TESTER
- * Mục tiêu: Theo dõi trend flip và đối chiếu chính xác với TradingView
- */
 async function runSupertrendTest() {
-  console.log(`🚀 Supertrend Tester Running`);
-  console.log(`📌 Symbol: ${CONFIG.SYMBOL}`);
-  console.log(
-    `📊 ATR: Period=${CONFIG.ATR_PERIOD}, Mult=${CONFIG.ATR_MULTIPLIER}`
-  );
-  console.log(`⌛ Interval: 10s (Check liên tục để bắt nến đóng sớm)\n`);
-
-  // Gửi thông báo khởi động qua Telegram
-  telly.sendMessage(
-    `🚀 <b>Supertrend Tester Started</b>\n` +
-      `📌 Symbol: <b>${CONFIG.SYMBOL}</b>\n` +
-      `📊 ATR: <b>${CONFIG.ATR_PERIOD} / ${CONFIG.ATR_MULTIPLIER}</b>\n` +
-      `📡 System is watching for signals...`,
-    "success"
-  );
+  console.log(`🚀 Supertrend Real-time Tester Started...`);
 
   let lastTrend: number | null = null;
   let lastSignalTime: number | null = null;
 
   while (true) {
     try {
-      // 1. Lấy dữ liệu Klines (nến)
+      // 1. Lấy nến (BingX 1m)
       const candles = await bingx.getKlines(CONFIG.SYMBOL, "1m");
-
-      if (
-        !candles ||
-        !candles.close ||
-        candles.close.length < CONFIG.ATR_PERIOD
-      ) {
-        console.log("⚠ Dữ liệu nến chưa đủ hoặc lỗi — retry sau 5s...");
+      if (!candles?.close?.length) {
         await wait(5000);
         continue;
       }
 
-      // 2. Tính toán Supertrend
-      // Lưu ý: Hàm này phải dùng bản RMA ATR để khớp TradingView
+      // 2. Tính toán các đường Supertrend
       const st = calculateSupertrend(
         candles.high,
         candles.low,
@@ -61,60 +31,58 @@ async function runSupertrendTest() {
         CONFIG.ATR_MULTIPLIER
       );
 
-      const currentPrice = candles.close.at(-1);
+      const currentPrice = candles.close.at(-1) ?? 0;
       const now = Date.now();
-      const timeStr = new Date().toLocaleString("vi-VN", {
-        hour12: false,
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      });
 
-      // 3. Log thông tin chi tiết để đối chiếu với TradingView
-      // st.value là con số đường Supertrend đang hiển thị trên biểu đồ
-      console.log(
-        `[${timeStr}] | ${st.trend === 1 ? "🟢 LONG" : "🔴 SHORT"} | ` +
-          `Price: ${currentPrice} | ST Line: ${st.value.toFixed(2)}`
-      );
+      // LOGIC NHẠY: So sánh giá hiện tại trực tiếp với đường ST
+      // Nếu giá vượt lên đường ST -> Trend 1 (Long)
+      // Nếu giá sập xuống đường ST -> Trend -1 (Short)
+      const instantTrend = currentPrice > st.value ? 1 : -1;
 
-      // 4. Xử lý Logic Signal khi đảo chiều (Trend Flip)
-      if (lastTrend !== null && st.trend !== lastTrend) {
+      // 3. Kiểm tra đảo chiều tức thì
+      if (lastTrend !== null && instantTrend !== lastTrend) {
         let durationStr = "";
         if (lastSignalTime) {
-          const diffSec = Math.floor((now - lastSignalTime) / 1000);
-          const m = Math.floor(diffSec / 60);
-          const s = diffSec % 60;
-          durationStr = `⏳ Trend cũ kéo dài: <b>${m}m ${s}s</b>\n`;
+          const diff = Math.floor((now - lastSignalTime) / 1000);
+          durationStr = `⏳ Trend cũ kéo dài: <b>${Math.floor(diff / 60)}m ${
+            diff % 60
+          }s</b>\n`;
         }
 
-        const signalType = st.trend === 1 ? "BUY" : "SELL";
-        const emoji = st.trend === 1 ? "🟢" : "🔴";
-        const trendText = st.trend === 1 ? "LONG" : "SHORT";
+        const signal = instantTrend === 1 ? "BUY" : "SELL";
+        const emoji = instantTrend === 1 ? "🟢" : "🔴";
 
-        // Gửi Telegram
         telly.sendMessage(
-          `${emoji} <b>${signalType} SIGNAL</b>\n` +
+          `${emoji} <b>${signal} SIGNAL (FAST)</b>\n` +
             `📌 Price: <b>${currentPrice}</b>\n` +
-            `🕒 Time: <b>${timeStr}</b>\n` +
-            `${durationStr}` +
-            `📈 Trend hiện tại: <b>${trendText}</b>`,
-          st.trend === 1 ? "success" : "error"
+            `🕒 Time: <b>${new Date().toLocaleTimeString("vi-VN")}</b>\n` +
+            `${durationStr}📈 Trend mới: <b>${
+              instantTrend === 1 ? "LONG" : "SHORT"
+            }</b>`,
+          instantTrend === 1 ? "success" : "error"
         );
 
         lastSignalTime = now;
       }
 
-      // Lưu lại trend hiện tại cho vòng lặp sau
-      lastTrend = st.trend;
+      // Log để bạn soi với TradingView
+      console.log(
+        `[${new Date().toLocaleTimeString()}] Price: ${currentPrice.toFixed(
+          2
+        )} | ST Line: ${st.value.toFixed(2)} | Trend: ${
+          instantTrend === 1 ? "LONG" : "SHORT"
+        }`
+      );
 
-      // 5. Nghỉ 10s trước khi check tiếp
-      await wait(10000);
-    } catch (error: any) {
-      console.error("❌ Lỗi hệ thống:", error?.message || error);
-      await wait(5000); // Đợi lâu hơn nếu có lỗi kết nối
+      lastTrend = instantTrend;
+
+      // Quét nhanh mỗi 5 giây để bắt kịp râu nến
+      await wait(5000);
+    } catch (e) {
+      console.error("❌ Error:", e);
+      await wait(5000);
     }
   }
 }
 
-// Chạy chương trình
-runSupertrendTest().catch(console.error);
+runSupertrendTest();
