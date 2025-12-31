@@ -1,83 +1,96 @@
 export interface SupertrendResult {
   trend: number;
   value: number;
-  signal: "BUY" | "SELL" | null;
+  upperBand: number;
+  lowerBand: number;
+  buySignal: boolean;
+  sellSignal: boolean;
 }
 
 export function calculateSupertrend(
   high: number[],
   low: number[],
   close: number[],
-  period: number = 10,
-  multiplier: number = 3
+  period: number = 10, // Pine v4 mặc định là 10
+  multiplier: number = 3.0 // Pine v4 mặc định là 3.0
 ): SupertrendResult {
   const size = close.length;
-  if (size < period) throw new Error("❌ Không đủ dữ liệu nến");
+  if (size <= period) throw new Error("Dữ liệu nến quá ngắn");
 
-  const hl2 = high.map((h, i) => (h + (low[i] ?? 0)) / 2);
+  // 1. Source: hl2
+  const src = high.map((h, i) => (h + (low[i] ?? h)) / 2);
 
-  // 1. Tính True Range (TR)
-  const tr: number[] = new Array(size).fill(0);
+  // 2. True Range (TR)
+  const tr = new Array(size).fill(0);
   for (let i = 1; i < size; i++) {
-    const h = high[i] ?? 0;
-    const l = low[i] ?? 0;
     const pc = close[i - 1] ?? 0;
-    tr[i] = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+    tr[i] = Math.max(
+      high[i]! - low[i]!,
+      Math.abs(high[i]! - pc),
+      Math.abs(low[i]! - pc)
+    );
   }
 
-  // 2. Tính ATR theo RMA (Running Moving Average) - Chuẩn TradingView
-  const atr: number[] = new Array(size).fill(0);
+  // 3. ATR (RMA - Running Moving Average chuẩn Pine Script)
+  const atr = new Array(size).fill(0);
+  const alpha = 1 / period;
+
+  // Khởi tạo giá trị ATR đầu tiên bằng SMA (đúng cách Pine Script vận hành)
   let sumTR = 0;
-  for (let i = 0; i < size; i++) {
-    const currentTR = tr[i] ?? 0;
-    if (i < period) {
-      sumTR += currentTR;
-      atr[i] = sumTR / (i + 1);
-    } else {
-      atr[i] = ((atr[i - 1] ?? 0) * (period - 1) + currentTR) / period;
-    }
+  for (let i = 0; i < period; i++) sumTR += tr[i] || 0;
+  atr[period - 1] = sumTR / period;
+
+  for (let i = period; i < size; i++) {
+    atr[i] = (tr[i] || 0) * alpha + (atr[i - 1] || 0) * (1 - alpha);
   }
 
-  const lowerBand: number[] = new Array(size).fill(0);
-  const upperBand: number[] = new Array(size).fill(0);
-  const trend: number[] = new Array(size).fill(1);
+  // 4. Các dải băng (up, dn) và Xu hướng (trend)
+  const up = new Array(size).fill(0);
+  const dn = new Array(size).fill(0);
+  const trend = new Array(size).fill(1);
 
-  // 3. Tính toán Bands
   for (let i = 0; i < size; i++) {
-    const curHL2 = hl2[i] ?? 0;
-    const curATR = atr[i] ?? 0;
-    if (i === 0) {
-      lowerBand[i] = curHL2 - multiplier * curATR;
-      upperBand[i] = curHL2 + multiplier * curATR;
+    if (i < period - 1) continue;
+
+    const basicUp = src[i]! - multiplier * atr[i]!;
+    const basicDn = src[i]! + multiplier * atr[i]!;
+
+    if (i === period - 1) {
+      up[i] = basicUp;
+      dn[i] = basicDn;
       continue;
     }
 
-    const basicLower = curHL2 - multiplier * curATR;
-    const basicUpper = curHL2 + multiplier * curATR;
-    const prevLower = lowerBand[i - 1] ?? 0;
-    const prevUpper = upperBand[i - 1] ?? 0;
-    const prevClose = close[i - 1] ?? 0;
+    const up_prev = up[i - 1]!;
+    const dn_prev = dn[i - 1]!;
+    const close_prev = close[i - 1]!;
 
-    lowerBand[i] =
-      prevClose > prevLower ? Math.max(basicLower, prevLower) : basicLower;
-    upperBand[i] =
-      prevClose < prevUpper ? Math.min(basicUpper, prevUpper) : basicUpper;
+    // Logic quan trọng nhất: Dải băng không bao giờ đi ngược hướng
+    // Pine: up := close[1] > up1 ? max(up, up1) : up
+    up[i] = close_prev > up_prev ? Math.max(basicUp, up_prev) : basicUp;
+    // Pine: dn := close[1] < dn1 ? min(dn, dn1) : dn
+    dn[i] = close_prev < dn_prev ? Math.min(basicDn, dn_prev) : basicDn;
 
-    let curTrend = trend[i - 1] ?? 1;
-    if (curTrend === -1 && (close[i] ?? 0) > prevUpper) curTrend = 1;
-    else if (curTrend === 1 && (close[i] ?? 0) < prevLower) curTrend = -1;
+    // Xác định xu hướng (Trend)
+    // Pine: trend := trend == -1 and close > dn1 ? 1 : trend == 1 and close < up1 ? -1 : trend
+    let curTrend = trend[i - 1]!;
+    if (curTrend === -1 && close[i]! > dn_prev) {
+      curTrend = 1;
+    } else if (curTrend === 1 && close[i]! < up_prev) {
+      curTrend = -1;
+    }
     trend[i] = curTrend;
   }
 
-  const last = size - 1;
+  const curr = size - 1;
+  const prev = size - 2;
+
   return {
-    trend: trend[last] ?? 1,
-    value: trend[last] === 1 ? lowerBand[last] ?? 0 : upperBand[last] ?? 0,
-    signal:
-      trend[last] !== trend[last - 1]
-        ? trend[last] === 1
-          ? "BUY"
-          : "SELL"
-        : null,
+    trend: trend[curr]!,
+    value: trend[curr] === 1 ? up[curr]! : dn[curr]!,
+    upperBand: dn[curr]!,
+    lowerBand: up[curr]!,
+    buySignal: trend[curr] === 1 && trend[prev] === -1,
+    sellSignal: trend[curr] === -1 && trend[prev] === 1,
   };
 }

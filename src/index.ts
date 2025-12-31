@@ -48,6 +48,8 @@ async function runCampaign(resumeFromExisting = false, startLevel = 0) {
       if (APP_STATE.needRestart) break;
 
       const candles = await bingx.getKlines(CONFIG.SYMBOL, "1m");
+
+      console.log(candles);
       if (!candles) {
         await new Promise((r) => setTimeout(r, 5000));
         continue;
@@ -95,20 +97,31 @@ async function runCampaign(resumeFromExisting = false, startLevel = 0) {
         }
       }
 
-      // Logic DCA khi đổi màu Supertrend
-      if (st.trend !== lastSignalTrend && lastSignalTrend !== null) {
-        currentDcaLevel++;
-        const dcaAmount = CONFIG.DCA_STEP_VALUE_USDT * currentDcaLevel;
+      // Trong vòng lặp runCampaign, đoạn check st.trend !== lastSignalTrend:
+
+      if (st.trend !== lastSignalTrend) {
+        currentDcaLevel++; // Tăng level (1, 2, 3...)
+
+        // Công thức cấp số cộng:
+        // Level 1: 10 + (1 * 10) = 20U
+        // Level 2: 10 + (2 * 10) = 30U
+        const dcaAmount =
+          CONFIG.INITIAL_SIZE_USDT +
+          currentDcaLevel * CONFIG.DCA_STEP_VALUE_USDT;
+
         const dcaQty = await bingx.amountToQty(dcaAmount, CONFIG.SYMBOL);
 
         if (st.trend === 1) await bingx.openLong(dcaQty);
         else await bingx.openShort(dcaQty);
 
         await telly.sendMessage(
-          `🔄 <b>DCA SKEW (Lv.${currentDcaLevel})</b>\nDirection: ${
-            st.trend === 1 ? "LONG 🟢" : "SHORT 🔴"
-          }\nAdded: $${dcaAmount}`
+          `🔄 <b>DCA ARITHMETIC SKEW (Lv.${currentDcaLevel})</b>\n` +
+            `Direction: ${st.trend === 1 ? "LONG 🟢" : "SHORT 🔴"}\n` +
+            `Added: <b>$${dcaAmount}</b>\n` +
+            `Next Target Vol: <b>$${(totalVolume + dcaAmount).toFixed(2)}</b>`
         );
+
+        lastSignalTrend = st.trend;
       }
 
       lastSignalTrend = st.trend;

@@ -43,7 +43,7 @@ export class BingXService {
         method,
         url,
         headers: { "X-BX-APIKEY": CONFIG.API_KEY },
-        transformResponse: [(data) => data],
+        transformResponse: [(data: any) => data],
       });
       return JSON.parse(resp.data);
     } catch (error: any) {
@@ -99,37 +99,52 @@ export class BingXService {
    */
   async getKlines(
     symbol: string,
-    interval: string = "15m",
-    limit: number = 100
+    interval: string = "1m",
+    limit: number = 500
   ) {
-    const res = await this.request("GET", "/openApi/swap/v3/quote/klines", {
-      symbol,
-      interval,
-      limit,
-    });
+    try {
+      const res = await this.request("GET", "/openApi/swap/v3/quote/klines", {
+        symbol,
+        interval,
+        limit,
+      });
 
-    // Kiểm tra và Log dữ liệu nếu cần debug
-    // console.log("Klines Response:", JSON.stringify(res));
+      if (!res || res.code !== 0 || !Array.isArray(res.data)) {
+        console.error("❌ BingX API Error:", res?.msg || "No data");
+        return null;
+      }
 
-    if (!res || res.code !== 0 || !res.data) {
-      console.error("❌ Failed to fetch Klines:", res?.msg);
+      let candles = res.data;
+
+      // 1. Sắp xếp dữ liệu theo thời gian (Cũ nhất ở đầu mảng)
+      // Dựa vào log của bạn, 'time' là 1767168540000
+      if (
+        candles.length > 1 &&
+        candles[0].time > candles[candles.length - 1].time
+      ) {
+        candles.reverse();
+      }
+
+      // 2. Truy xuất theo KEY (vì dữ liệu là Object)
+      const high = candles.map((d: any) => parseFloat(String(d.high || 0)));
+      const low = candles.map((d: any) => parseFloat(String(d.low || 0)));
+      const close = candles.map((d: any) => parseFloat(String(d.close || 0)));
+
+      // 3. Kiểm tra tính hợp lệ
+      const lastClose = close[close.length - 1];
+      if (isNaN(lastClose) || lastClose === 0) {
+        console.error(
+          "❌ Dữ liệu nến vẫn bị NaN. Kiểm tra cấu trúc d:",
+          candles[0]
+        );
+        return null;
+      }
+
+      return { high, low, close };
+    } catch (e) {
+      console.error("❌ Exception Klines:", e);
       return null;
     }
-
-    // BingX V3 thường trả về mảng trực tiếp trong res.data
-    // Tuy nhiên, ta cần đảm bảo nó là một mảng trước khi dùng .map()
-    const candles = Array.isArray(res.data) ? res.data : [];
-
-    if (candles.length === 0) {
-      console.warn("⚠️ Klines data is empty");
-      return null;
-    }
-
-    return {
-      high: candles.map((d: any) => parseFloat(d.high || d[2])), // d.high hoặc index 2 tùy version
-      low: candles.map((d: any) => parseFloat(d.low || d[3])),
-      close: candles.map((d: any) => parseFloat(d.close || d[4])),
-    };
   }
 
   /**
@@ -258,7 +273,30 @@ export class BingXService {
     }
     return 0;
   }
+  /**
+   * Lấy thông tin Ticker (Giá hiện tại, thay đổi 24h,...)
+   */
+  async getTicker(symbol: string) {
+    try {
+      const res = await this.request("GET", "/openApi/swap/v2/quote/ticker", {
+        symbol,
+      });
 
+      if (res && res.code === 0 && res.data) {
+        // Trả về object chứa lastPrice để bot xử lý
+        return {
+          lastPrice: res.data.lastPrice,
+          highPrice: res.data.highPrice,
+          lowPrice: res.data.lowPrice,
+          volume: res.data.volume,
+        };
+      }
+      return null;
+    } catch (error) {
+      console.error(`❌ Error fetching Ticker for ${symbol}:`, error);
+      return null;
+    }
+  }
   /**
    * Quy đổi từ số tiền USDT sang số lượng Coin (Quantity)
    * @param amount số tiền USDT (ví dụ 10 USDT)
