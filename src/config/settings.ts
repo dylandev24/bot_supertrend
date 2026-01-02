@@ -9,7 +9,7 @@ export const CONFIG = {
   protocol: "https",
 
   // Cài đặt chiến thuật
-  SYMBOL: "ETH-USDT", // Luôn dùng định dạng X-USDT
+  SYMBOL: "HYPE-USDT", // Luôn dùng định dạng X-USDT
   INITIAL_SIZE_USDT: 10, // Lệnh đầu (Level 0): 10U
   DCA_STEP_VALUE_USDT: 10, // Giá trị tăng thêm mỗi cấp: 10U (DCA = 10, 20, 30...)
 
